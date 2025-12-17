@@ -1,0 +1,22 @@
+version: "3.9"
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+    ports:
+      - "8000:8000"
+
+  api-tests:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api-tests
+    depends_on:
+      - app
+
+  ui-tests:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ui-tests
+    depends_on:
+      - app

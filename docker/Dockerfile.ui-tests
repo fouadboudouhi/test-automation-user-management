@@ -1,0 +1,5 @@
+FROM mcr.microsoft.com/playwright/python:v1.43.0
+WORKDIR /tests
+COPY tests /tests
+RUN pip install pytest
+CMD ["pytest", "tests/ui"]
