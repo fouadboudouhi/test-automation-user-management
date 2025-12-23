@@ -1,6 +1,53 @@
-- name: Upload Allure results
-  if: always()
-  uses: actions/upload-artifact@v4
-  with:
-    name: allure-results
-    path: allure-results
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: API & UI Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout source code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Ensure Docker Compose is available (usually preinstalled, but explicit is better)
+      - name: Verify Docker setup
+        run: |
+          docker --version
+          docker compose version
+
+      # 3. Build all images (fail fast if Dockerfiles are broken)
+      - name: Build Docker images
+        run: docker compose build
+
+      # 4. Start required services
+      - name: Start application services
+        run: docker compose up -d db app
+
+      # 5. Run API tests (HARD QUALITY GATE)
+      - name: Run API tests
+        run: docker compose run --rm api-tests
+
+      # 6. Run UI tests (small, stable set)
+      - name: Run UI tests
+        run: docker compose run --rm ui-tests
+
+      # 7. Upload Allure results (always, even on failure)
+      - name: Upload Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results
+
+      # 8. Cleanup (optional but explicit)
+      - name: Shutdown containers
+        if: always()
+        run: docker compose down -v
