@@ -4,10 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="7ae2f2ca-10e7-4f2f-9794-670ee37a8f0b" name="Changes" comment="feat: stabilize UI tests and integrate Allure reporting&#10;&#10;- fix UI test scope to validate user intent instead of backend state&#10;- resolve flaky UI assertions by removing implicit data assumptions&#10;- add Allure reporting for API and UI tests&#10;- attach screenshots on UI test failures&#10;- ensure pytest markers are properly registered in containers&#10;- fix missing runtime dependencies in app container&#10;- align local and container test execution for reproducibility">
-      <change beforePath="$PROJECT_DIR$/.github/workflows/ci.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.github/workflows/ci.yml" afterDir="false" />
+    <list default="true" id="7ae2f2ca-10e7-4f2f-9794-670ee37a8f0b" name="Changes" comment="ci: finalize GitHub Actions pipeline with Docker-based test execution&#10;&#10;- trigger CI on pull requests, main branch pushes, and manual dispatch&#10;- run API tests as hard quality gate&#10;- execute minimal UI test suite after API validation&#10;- collect Allure results as CI artifacts&#10;- ensure clean startup and teardown of services">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/api/crud.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/api/crud.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -90,7 +89,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766502436736</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="ci: finalize GitHub Actions pipeline with Docker-based test execution&#10;&#10;- trigger CI on pull requests, main branch pushes, and manual dispatch&#10;- run API tests as hard quality gate&#10;- execute minimal UI test suite after API validation&#10;- collect Allure results as CI artifacts&#10;- ensure clean startup and teardown of services">
+      <option name="closed" value="true" />
+      <created>1766503801246</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1766503801246</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -99,6 +106,7 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="feat: turn project skeleton into fully testable user management system&#10;&#10;- implement full user CRUD API using FastAPI&#10;- add PostgreSQL persistence with SQLAlchemy ORM&#10;- enforce data integrity via unique email constraint&#10;- introduce deterministic API tests with database reset per test&#10;- add health endpoint and explicit readiness waiting for stable test execution&#10;- provide minimal web UI only for critical UI test coverage&#10;- dockerize app, tests and database for identical local and CI execution&#10;- fix missing runtime dependency required for EmailStr validation" />
     <MESSAGE value="feat: stabilize UI tests and integrate Allure reporting&#10;&#10;- fix UI test scope to validate user intent instead of backend state&#10;- resolve flaky UI assertions by removing implicit data assumptions&#10;- add Allure reporting for API and UI tests&#10;- attach screenshots on UI test failures&#10;- ensure pytest markers are properly registered in containers&#10;- fix missing runtime dependencies in app container&#10;- align local and container test execution for reproducibility" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat: stabilize UI tests and integrate Allure reporting&#10;&#10;- fix UI test scope to validate user intent instead of backend state&#10;- resolve flaky UI assertions by removing implicit data assumptions&#10;- add Allure reporting for API and UI tests&#10;- attach screenshots on UI test failures&#10;- ensure pytest markers are properly registered in containers&#10;- fix missing runtime dependencies in app container&#10;- align local and container test execution for reproducibility" />
+    <MESSAGE value="ci: finalize GitHub Actions pipeline with Docker-based test execution&#10;&#10;- trigger CI on pull requests, main branch pushes, and manual dispatch&#10;- run API tests as hard quality gate&#10;- execute minimal UI test suite after API validation&#10;- collect Allure results as CI artifacts&#10;- ensure clean startup and teardown of services" />
+    <option name="LAST_COMMIT_MESSAGE" value="ci: finalize GitHub Actions pipeline with Docker-based test execution&#10;&#10;- trigger CI on pull requests, main branch pushes, and manual dispatch&#10;- run API tests as hard quality gate&#10;- execute minimal UI test suite after API validation&#10;- collect Allure results as CI artifacts&#10;- ensure clean startup and teardown of services" />
   </component>
 </project>

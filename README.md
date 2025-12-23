@@ -11,6 +11,22 @@ The system is intentionally kept small to allow deep discussion of:
 
 ---
 
+## Why This Project
+
+This project is designed to demonstrate how quality is built and protected
+in a realistic engineering environment.
+
+Instead of maximizing feature count, the focus is on:
+- clear test responsibility boundaries
+- deterministic and reproducible execution
+- fast feedback through CI quality gates
+- conscious trade-offs to reduce long-term maintenance cost
+
+The scope is intentionally limited to allow meaningful discussion about
+engineering decisions rather than implementation details.
+
+---
+
 ## System Overview
 
 The system consists of a minimal User Management application with full test automation on API and UI level.
@@ -30,20 +46,20 @@ The system consists of a minimal User Management application with full test auto
 ## Architecture
 
 ```
-┌────────────┐      HTTP       ┌──────────────┐      SQL     ┌────────────┐
-│  UI Tests  │ ─────────────▶  │   FastAPI    │ ───────────▶ │ PostgreSQL │
-│ Playwright│                  │  User API    │              │            │
-└────────────┘                 └──────────────┘              └────────────┘
+┌────────────┐      HTTP      ┌──────────────┐      SQL     ┌────────────┐
+│  UI Tests  │ ─────────────▶ │   FastAPI    │ ───────────▶ │ PostgreSQL │
+│ Playwright │                │   User API   │              │            │
+└────────────┘                └──────────────┘              └────────────┘
        ▲                              ▲
        │                              │
        │            HTTP              │
-       └───────── API Tests ──────────┘
-                   pytest
+       └────────── API Tests ─────────┘
+                    pytest
 ```
 
 ---
 
-## API Scope (intentionally limited)
+## API Scope (Intentionally Limited)
 
 ### User Operations
 - Create User
@@ -69,69 +85,39 @@ UI tests validate intent, not backend state.
 
 ---
 
-## Deterministic Test Design
+## Smoke Tests
 
-- Database reset between tests
-- No test dependencies
-- No uncontrolled randomness
-- No static sleeps
+Smoke tests verify that the system is deployable and fundamentally usable.
+
+In this project, smoke coverage includes:
+- application startup with database connectivity
+- API health endpoint availability
+- basic UI reachability
 
 ---
 
-## Docker & Execution Model
+## Dependencies
 
-Services:
-- `db`
-- `app`
+All Python dependencies are pinned and documented in `requirements.txt`.
 
-Test runners:
-- `api-tests`
-- `ui-tests`
-
-Execution:
-```bash
-docker compose run --rm api-tests
-docker compose run --rm ui-tests
+```text
+fastapi
+uvicorn
+pydantic
+email-validator
+pytest
+requests
+playwright
+allure-pytest
+psycopg[binary]
 ```
 
 ---
 
-## CI Pipeline
+## Summary
 
-Triggers:
-- Pull Requests
-- Push to main
-
-Stages:
-1. Start services
-2. Run API tests (hard gate)
-3. Run UI tests
-4. Publish Allure artifacts
-
----
-
-## Allure Reporting
-
-- Unified API + UI report
-- Screenshots on UI failures
-- Available locally and in CI
-
----
-
-## Trade-offs
-
-| Decision | Reason |
-|--------|--------|
-| PostgreSQL | Production-like |
-| Few UI tests | Stability |
-| No auth | Focus on testing |
-| No history | Simplicity |
-
----
-
-## Next Steps
-
-- Parallel execution
-- Allure history
-- Contract tests
-- Performance testing
+This project demonstrates how test automation can be used to actively protect software quality by:
+- making quality ownership explicit
+- applying a clear and intentional test strategy
+- ensuring reproducible execution across local and CI environments
+- enforcing meaningful quality gates in CI

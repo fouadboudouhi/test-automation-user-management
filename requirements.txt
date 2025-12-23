@@ -1,0 +1,12 @@
+fastapi==0.115.0
+uvicorn==0.30.6
+pydantic==2.9.2
+email-validator==2.2.0
+
+pytest==8.3.2
+requests==2.32.3
+
+playwright==1.43.0
+allure-pytest==2.13.5
+
+psycopg[binary]==3.2.1
