@@ -1,16 +1,19 @@
 *** Settings ***
-Documentation     Common keywords for browser lifecycle management.
-...               These keywords are intentionally minimal and deterministic.
+Documentation     Common browser lifecycle keywords.
 Library           Browser
 
 *** Keywords ***
 Open Toolshop
-    [Documentation]    Opens the application under test in a clean browser context.
+    [Documentation]    Opens the application under test in a CI-stable way.
     New Browser    chromium    headless=true
-    New Context    viewport={'width': 1280, 'height': 800}
+    New Context    viewport={'width': 1920, 'height': 1080}
     New Page       %{BASE_URL}
-    Wait For Load State    networkidle
+
+    # IMPORTANT:
+    # Do NOT wait for "networkidle" in CI.
+    # The application keeps background requests open.
+    Wait For Load State    domcontentloaded    timeout=30s
 
 Close Toolshop
-    [Documentation]    Closes the browser and frees all resources.
+    [Documentation]    Closes the browser.
     Close Browser
