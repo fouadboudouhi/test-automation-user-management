@@ -1,7 +1,5 @@
 *** Settings ***
-Documentation     Smoke test verifying that login is possible with demo credentials.
-...               The test validates successful authentication by URL change,
-...               not by UI rendering details.
+Documentation     Smoke test verifying that login changes authentication state.
 Resource          ../resources/keywords/common.robot
 Suite Setup       Open Toolshop
 Suite Teardown    Close Toolshop
@@ -10,42 +8,28 @@ Suite Teardown    Close Toolshop
 Login Is Possible
     [Tags]    smoke    login
 
-    Click Sign In
-    Wait For Login Form
+    # Open login form
+    Wait For Elements State    css=[data-test="nav-sign-in"]    visible    timeout=20s
+    Click    css=[data-test="nav-sign-in"]
 
-    Fill Login Credentials
-    Submit Login Form
+    # Fill credentials
+    Wait For Elements State    css=input#email       visible    timeout=20s
+    Wait For Elements State    css=input#password    visible    timeout=20s
 
-    Verify Login Successful
+    Fill Text    css=input#email       ${EMAIL}
+    Fill Text    css=input#password    ${PASSWORD}
+    Click        css=[data-test="login-submit"]
+
+    # Smoke-level assertion:
+    # login is successful when sign-in disappears
+    # and account navigation becomes available
+    Wait Until Keyword Succeeds    20s    1s    Login Navigation Should Be Visible
 
 
 *** Keywords ***
-Click Sign In
-    Wait For Elements State
-    ...    css=[data-test="nav-sign-in"]
-    ...    visible
-    ...    timeout=20s
-    Click    css=[data-test="nav-sign-in"]
+Login Navigation Should Be Visible
+    ${signin}=    Get Element Count    css=[data-test="nav-sign-in"]
+    ${account}=   Get Element Count    css=[data-test="nav-my-account"]
 
-Wait For Login Form
-    Wait For Elements State
-    ...    css=input#email
-    ...    visible
-    ...    timeout=20s
-    Wait For Elements State
-    ...    css=input#password
-    ...    visible
-    ...    timeout=20s
-
-Fill Login Credentials
-    Fill Text    css=input#email       ${EMAIL}
-    Fill Text    css=input#password    ${PASSWORD}
-
-Submit Login Form
-    Click    css=[data-test="login-submit"]
-
-Verify Login Successful
-    # CI-stable assertion:
-    # Login is considered successful once the user is redirected
-    # to the account area.
-    Wait Until Location Contains    /account    timeout=20s
+    Should Be Equal As Integers    ${signin}    0
+    Should Be True                 ${account} > 0

@@ -58,12 +58,10 @@ jobs:
             artifacts/**/log.html
             artifacts/**/report.html
 
-      - name: Upload Browser Artifacts (Screenshots & Logs)
+      - name: Upload Browser Artifacts (Screenshots & Videos)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: browser-artifacts
           path: |
-            browser/
-            playwright-log.txt
-            artifacts/**/browser/
+            artifacts/browser/
