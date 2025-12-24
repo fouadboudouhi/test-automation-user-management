@@ -33,27 +33,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create CI compose override (disable arm64-only services)
+      - name: Create CI compose override (avoid arm64-only services)
         shell: bash
         run: |
           set -euo pipefail
           cat > "${COMPOSE_OVERRIDE}" <<'YAML'
           services:
+            # arm64-only image -> don't use it in CI
             web:
-              profiles: ["disabled"]
+              profiles: ["ci-skip"]
+
+            # cron not needed for UI tests (and may be arch-problematic)
             cron:
-              profiles: ["disabled"]
+              profiles: ["ci-skip"]
+
+            # expose API directly for API_DOC_URL
             laravel-api:
               ports:
                 - "8091:80"
+
+            # IMPORTANT: remove dependency on "web" in CI
             angular-ui:
               depends_on:
                 - laravel-api
           YAML
-          echo "Created override:"
+
+          echo "Override file created at ${COMPOSE_OVERRIDE}:"
           cat "${COMPOSE_OVERRIDE}"
 
-      - name: Start docker stack
+          echo "Sanity check merged compose config..."
+          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" config >/dev/null
+          echo "Compose config OK."
+
+      - name: Start docker stack (with CI override)
         shell: bash
         run: |
           set -euo pipefail
@@ -163,16 +175,17 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" logs --no-color | tail -n 500
+          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" ps || true
+          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" logs --no-color | tail -n 500 || true
 
       - name: Stop docker stack
         if: always()
         shell: bash
         run: |
-          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" down -v
+          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" down -v || true
 
   regression:
-    name: Regression (fails the workflow on bugs)
+    name: Regression (fails workflow on bugs)
     runs-on: ubuntu-latest
     needs: smoke
     if: needs.smoke.result == 'success'
@@ -195,16 +208,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create CI compose override (disable arm64-only services)
+      - name: Create CI compose override (avoid arm64-only services)
         shell: bash
         run: |
           set -euo pipefail
           cat > "${COMPOSE_OVERRIDE}" <<'YAML'
           services:
             web:
-              profiles: ["disabled"]
+              profiles: ["ci-skip"]
             cron:
-              profiles: ["disabled"]
+              profiles: ["ci-skip"]
             laravel-api:
               ports:
                 - "8091:80"
@@ -213,7 +226,9 @@ jobs:
                 - laravel-api
           YAML
 
-      - name: Start docker stack
+          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" config >/dev/null
+
+      - name: Start docker stack (with CI override)
         shell: bash
         run: |
           set -euo pipefail
@@ -226,10 +241,12 @@ jobs:
           set -euo pipefail
           for i in {1..120}; do
             if curl -fsS "${API_DOC_URL}" >/dev/null 2>&1; then
+              echo "API is reachable."
               exit 0
             fi
             sleep 2
           done
+          echo "API did not become reachable in time."
           docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" logs --no-color | tail -n 300
           exit 1
 
@@ -240,10 +257,12 @@ jobs:
           for i in {1..60}; do
             if docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" exec -T "${DB_SERVICE}" \
               sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent' >/dev/null 2>&1; then
+              echo "DB is ready."
               exit 0
             fi
             sleep 2
           done
+          echo "DB did not become ready in time."
           docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" logs --no-color | tail -n 300
           exit 1
 
@@ -253,16 +272,32 @@ jobs:
           set -euo pipefail
           docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" exec -T "${API_SERVICE}" ${SEED_CMD}
 
+      - name: Verify seed (products must exist)
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$(docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" exec -T "${API_SERVICE}" \
+            php artisan tinker --execute="echo \App\Models\Product::count();" || true)"
+          COUNT="$(echo "${OUT}" | tr -dc '0-9' || true)"
+          echo "Product count: ${COUNT}"
+          if [[ -z "${COUNT}" || "${COUNT}" -le 0 ]]; then
+            echo "Seed verification failed."
+            echo "${OUT}"
+            exit 1
+          fi
+
       - name: Wait for UI
         shell: bash
         run: |
           set -euo pipefail
           for i in {1..120}; do
             if curl -fsS "${BASE_URL}" >/dev/null 2>&1; then
+              echo "UI is reachable."
               exit 0
             fi
             sleep 2
           done
+          echo "UI did not become reachable in time."
           docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" logs --no-color | tail -n 300
           exit 1
 
@@ -299,10 +334,11 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" logs --no-color | tail -n 500
+          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" ps || true
+          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" logs --no-color | tail -n 500 || true
 
       - name: Stop docker stack
         if: always()
         shell: bash
         run: |
-          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" down -v
+          docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_OVERRIDE}" down -v || true
