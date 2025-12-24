@@ -32,6 +32,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Force Docker platform
+        shell: bash
+        run: |
+          echo "DOCKER_DEFAULT_PLATFORM=linux/amd64" >> $GITHUB_ENV
+
       - name: Start docker stack
         shell: bash
         run: |
@@ -172,6 +177,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Force Docker platform
+        shell: bash
+        run: |
+          echo "DOCKER_DEFAULT_PLATFORM=linux/amd64" >> $GITHUB_ENV
 
       - name: Start docker stack
         shell: bash

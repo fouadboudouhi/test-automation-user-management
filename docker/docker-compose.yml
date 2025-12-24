@@ -1,6 +1,7 @@
 services:
   mariadb:
     image: yobasystems/alpine-mariadb:10.6.11
+    platform: linux/amd64
     ports:
       - "3306:3306"
     environment:
@@ -11,6 +12,7 @@ services:
 
   laravel-api:
     image: testsmith/practice-software-testing-${SPRINT:-sprint5}-api
+    platform: linux/amd64
     depends_on:
       - mariadb
     environment:
@@ -22,24 +24,27 @@ services:
     volumes:
       - laravel-app-code:/var/www
 
-  angular-ui:
-    image: testsmith/practice-software-testing-${SPRINT:-sprint5}-ui
-    ports:
-      - "4200:4200"
-    command: bash -c "ng serve --host 0.0.0.0 --port 4200"
-    depends_on:
-      - web
-
   web:
     image: testsmith/practice-software-testing-web
+    platform: linux/amd64
     ports:
       - "8091:80"
       - "8000:81"
     depends_on:
       - laravel-api
 
+  angular-ui:
+    image: testsmith/practice-software-testing-${SPRINT:-sprint5}-ui
+    platform: linux/amd64
+    ports:
+      - "4200:4200"
+    command: bash -c "ng serve --host 0.0.0.0 --port 4200"
+    depends_on:
+      - web
+
   cron:
     image: testsmith/practice-software-testing-cron
+    platform: linux/amd64
     restart: always
     depends_on:
       - mariadb
