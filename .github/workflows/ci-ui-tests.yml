@@ -14,6 +14,8 @@ jobs:
       BASE_URL: https://practicesoftwaretesting.com
       DEMO_EMAIL: customer@practicesoftwaretesting.com
       DEMO_PASSWORD: welcome01
+      # CI stabiler machen
+      CI: "true"
 
     steps:
       - name: Checkout repository
@@ -22,7 +24,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -30,38 +32,25 @@ jobs:
           pip install -r requirements.txt
           rfbrowser init
 
-      # -------------------------
-      # SMOKE = QUALITY GATE
-      # -------------------------
-      - name: Run UI Smoke Tests
+      - name: Run UI Smoke Tests (quality gate)
         run: |
-          robot -d artifacts/smoke ui-tests/smoke
+          robot \
+            --loglevel TRACE \
+            --outputdir artifacts/smoke \
+            ui-tests/smoke
 
-      # -------------------------
-      # REGRESSION = INFORMATIONAL
-      # -------------------------
-      - name: Run UI Regression Tests
+      - name: Run UI Regression Tests (informational)
         continue-on-error: true
         run: |
-          robot -d artifacts/regression ui-tests/regression
+          robot \
+            --loglevel TRACE \
+            --outputdir artifacts/regression \
+            ui-tests/regression
 
-      # -------------------------
-      # ARTEFACTS (ALWAYS)
-      # -------------------------
-      - name: Upload Robot Reports
+      - name: Upload Robot Artifacts (reports + screenshots + traces/videos if enabled)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: robot-reports
+          name: ui-artifacts
           path: |
-            artifacts/**/output.xml
-            artifacts/**/log.html
-            artifacts/**/report.html
-
-      - name: Upload Browser Artifacts (Screenshots & Videos)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: browser-artifacts
-          path: |
-            artifacts/browser/
+            artifacts/**
