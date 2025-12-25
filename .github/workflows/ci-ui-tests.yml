@@ -179,16 +179,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Enable QEMU (for ARM images on amd64 runner)
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Force Docker platform (ARM64)
-        shell: bash
-        run: |
-          echo "DOCKER_DEFAULT_PLATFORM=linux/arm64" >> "$GITHUB_ENV"
-
       - name: Start docker stack
         shell: bash
         run: |
