@@ -1,8 +1,6 @@
 *** Settings ***
 Documentation     Smoke test verifying that the homepage is reachable.
 Resource          ../resources/keywords/common.robot
-Suite Setup       Open Toolshop
-Suite Teardown    Close Toolshop
 
 *** Test Cases ***
 Homepage Is Reachable

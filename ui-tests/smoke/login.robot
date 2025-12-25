@@ -1,8 +1,6 @@
 *** Settings ***
 Documentation     Smoke test verifying that login is possible.
 Resource          ../resources/keywords/common.robot
-Suite Setup       Open Toolshop
-Suite Teardown    Close Toolshop
 
 *** Test Cases ***
 Login Is Possible

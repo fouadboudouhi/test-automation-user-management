@@ -4,11 +4,8 @@ Resource          ../../resources/keywords/common.robot
 
 *** Test Cases ***
 Sort Products By Price
-    [Tags]    regression
-    Open Toolshop
     Click    css=[data-test="sort"] >> nth=0
     Wait Until Keyword Succeeds    10s    500ms    Sorted Results Should Exist
-    Close Toolshop
 
 *** Keywords ***
 Sorted Results Should Exist

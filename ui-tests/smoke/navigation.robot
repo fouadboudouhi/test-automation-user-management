@@ -1,8 +1,6 @@
 *** Settings ***
 Documentation     Smoke test verifying that navigation is present.
 Resource          ../resources/keywords/common.robot
-Suite Setup       Open Toolshop
-Suite Teardown    Close Toolshop
 
 *** Test Cases ***
 Navigation Is Visible

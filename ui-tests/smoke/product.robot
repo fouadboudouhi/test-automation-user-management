@@ -1,8 +1,6 @@
 *** Settings ***
 Documentation     Smoke test verifying that at least one product card is visible.
 Resource          ../resources/keywords/common.robot
-Suite Setup       Open Toolshop
-Suite Teardown    Close Toolshop
 
 *** Test Cases ***
 Product Page Is Reachable

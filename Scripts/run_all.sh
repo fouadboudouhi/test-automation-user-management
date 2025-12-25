@@ -7,11 +7,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
 # --- config (override via env) ---
-UI_PORT="${UI_PORT:-4200}"
-API_PORT="${API_PORT:-8091}"
-
-BASE_URL="${BASE_URL:-http://localhost:${UI_PORT}}"
-API_DOC_URL="${API_DOC_URL:-http://localhost:${API_PORT}/api/documentation}"
+BASE_URL="${BASE_URL:-http://localhost:4200}"
+API_DOC_URL="${API_DOC_URL:-http://localhost:8091/api/documentation}"
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker/docker-compose.yml}"
 

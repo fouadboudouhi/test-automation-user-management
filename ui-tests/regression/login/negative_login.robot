@@ -5,8 +5,6 @@ Resource          ../../resources/keywords/common.robot
 
 *** Test Cases ***
 Login With Invalid Credentials
-    [Tags]    regression
-    Open Toolshop
 
     Click    css=[data-test="nav-sign-in"]
 
@@ -16,5 +14,3 @@ Login With Invalid Credentials
 
     # Regression-level assertion: error feedback is shown
     Wait For Elements State    css=.alert-danger    visible    timeout=10s
-
-    Close Toolshop
