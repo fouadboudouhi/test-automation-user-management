@@ -31,48 +31,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect Robot test root (TEST_ROOT)
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Workspace: $(pwd)"
-          ls -la
-
-          candidates=(
-            "ui-tests"
-            "ui_tests"
-            "tests/ui"
-            "tests/ui-tests"
-            "tests/ui_tests"
-            "robot"
-            "tests/robot"
-          )
-
-          TEST_ROOT=""
-          for d in "${candidates[@]}"; do
-            if [[ -d "$d" ]] && find "$d" -type f -name "*.robot" | head -n 1 >/dev/null; then
-              TEST_ROOT="$d"
-              break
-            fi
-          done
-
-          if [[ -z "$TEST_ROOT" ]]; then
-            # Fallback: first folder containing *.robot within reasonable depth
-            found_dir="$(find . -maxdepth 5 -type f -name "*.robot" -printf '%h\n' | sort -u | head -n 1 || true)"
-            found_dir="${found_dir#./}"
-            TEST_ROOT="${found_dir:-}"
-          fi
-
-          if [[ -z "$TEST_ROOT" ]]; then
-            echo "ERROR: Could not find any Robot Framework test directory (*.robot)."
-            echo "Debug: listing potential directories:"
-            find . -maxdepth 3 -type d -print
-            exit 1
-          fi
-
-          echo "Detected TEST_ROOT=$TEST_ROOT"
-          echo "TEST_ROOT=$TEST_ROOT" >> "$GITHUB_ENV"
-
       - name: Create docker-compose CI override (random host ports)
         shell: bash
         run: |
@@ -93,24 +51,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            up -d --pull missing
-          docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            ps
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
+          eval "$COMPOSE up -d --pull missing"
+          eval "$COMPOSE ps"
 
       - name: Detect published ports and export BASE_URL / API_DOC_URL
         shell: bash
         run: |
           set -euo pipefail
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
 
-          WEB_BIND="$(docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            port web 80)"
-          UI_BIND="$(docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            port angular-ui 4200)"
+          WEB_BIND="$(eval "$COMPOSE port web 80")"
+          UI_BIND="$(eval "$COMPOSE port angular-ui 4200")"
 
           WEB_PORT="${WEB_BIND##*:}"
           UI_PORT="${UI_BIND##*:}"
@@ -118,17 +70,16 @@ jobs:
           echo "API_DOC_URL=http://localhost:${WEB_PORT}/api/documentation" >> "$GITHUB_ENV"
           echo "BASE_URL=http://localhost:${UI_PORT}" >> "$GITHUB_ENV"
 
-          echo "Resolved:"
-          echo "  API_DOC_URL=http://localhost:${WEB_PORT}/api/documentation"
-          echo "  BASE_URL=http://localhost:${UI_PORT}"
-
       - name: Wait for API docs endpoint
         shell: bash
         run: |
           set -euo pipefail
           echo "Waiting for API docs on ${API_DOC_URL} ..."
           for i in {1..180}; do
-            curl -fsS "${API_DOC_URL}" >/dev/null 2>&1 && echo "API docs reachable ✅" && exit 0
+            if curl -fsS "${API_DOC_URL}" >/dev/null 2>&1; then
+              echo "API docs reachable ✅"
+              exit 0
+            fi
             sleep 2
           done
           echo "API docs not reachable ❌"
@@ -138,12 +89,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
+
           echo "Waiting for DB (${DB_SERVICE}) ..."
           for i in {1..120}; do
-            if docker compose -p "${COMPOSE_PROJECT_NAME}" \
-              -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-              exec -T "${DB_SERVICE}" sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent' \
-              >/dev/null 2>&1; then
+            if eval "$COMPOSE exec -T '${DB_SERVICE}' sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent'" >/dev/null 2>&1; then
               echo "DB ready ✅"
               exit 0
             fi
@@ -156,18 +106,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
           echo "Seeding in ${API_SERVICE}: ${SEED_CMD}"
-          docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            exec -T "${API_SERVICE}" ${SEED_CMD}
+          eval "$COMPOSE exec -T '${API_SERVICE}' ${SEED_CMD}"
 
       - name: Verify seed (product count > 0)
         shell: bash
         run: |
           set -euo pipefail
-          OUT="$(docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            exec -T "${API_SERVICE}" php artisan tinker --execute='echo \App\Models\Product::count();' || true)"
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
+          OUT="$(eval "$COMPOSE exec -T '${API_SERVICE}' php artisan tinker --execute='echo \App\Models\Product::count();'" || true)"
           COUNT="$(echo "${OUT}" | tr -dc '0-9' || true)"
           echo "Product count: ${COUNT}"
           [[ -n "${COUNT}" && "${COUNT}" -gt 0 ]]
@@ -178,7 +126,10 @@ jobs:
           set -euo pipefail
           echo "Waiting for UI on ${BASE_URL} ..."
           for i in {1..180}; do
-            curl -fsS "${BASE_URL}" >/dev/null 2>&1 && echo "UI reachable ✅" && exit 0
+            if curl -fsS "${BASE_URL}" >/dev/null 2>&1; then
+              echo "UI reachable ✅"
+              exit 0
+            fi
             sleep 2
           done
           echo "UI not reachable ❌"
@@ -204,36 +155,55 @@ jobs:
           pip install -r requirements.txt
           rfbrowser init
 
-      - name: Run Smoke (QGate)
+      # -----------------------
+      # API Smoke (Gate #1)
+      # -----------------------
+      - name: Run API Smoke (pytest)
         shell: bash
         run: |
           set -euo pipefail
-          echo "Running Robot tests from TEST_ROOT=${TEST_ROOT}"
-          test -d "${TEST_ROOT}" || (echo "ERROR: TEST_ROOT does not exist: ${TEST_ROOT}" && exit 1)
-          robot --outputdir artifacts/smoke --include smoke "${TEST_ROOT}"
+          mkdir -p artifacts/api/smoke
+          pytest -q -m "smoke" \
+            --junitxml="artifacts/api/smoke/junit.xml" \
+            "api-tests"
 
-      - name: Upload Smoke artifacts
+      - name: Upload API Smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-artifacts-smoke
+          path: artifacts/api/smoke
+
+      # -----------------------
+      # UI Smoke (Gate #2)
+      # -----------------------
+      - name: Run UI Smoke (Robot)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/ui/smoke
+          robot --outputdir artifacts/ui/smoke --include smoke ui-tests
+
+      - name: Upload UI Smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: robot-artifacts-smoke
-          path: artifacts/smoke
+          path: artifacts/ui/smoke
 
       - name: Docker logs (always)
         if: always()
         shell: bash
         run: |
-          docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            logs --no-color | tail -n 500
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
+          eval "$COMPOSE logs --no-color | tail -n 500"
 
       - name: Stop docker stack
         if: always()
         shell: bash
         run: |
-          docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            down -v --remove-orphans
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
+          eval "$COMPOSE down -v --remove-orphans"
 
   regression:
     name: Regression
@@ -257,25 +227,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect Robot test root (TEST_ROOT)
-        shell: bash
-        run: |
-          set -euo pipefail
-          candidates=("ui-tests" "ui_tests" "tests/ui" "tests/ui-tests" "tests/ui_tests" "robot" "tests/robot")
-          TEST_ROOT=""
-          for d in "${candidates[@]}"; do
-            if [[ -d "$d" ]] && find "$d" -type f -name "*.robot" | head -n 1 >/dev/null; then
-              TEST_ROOT="$d"; break
-            fi
-          done
-          if [[ -z "$TEST_ROOT" ]]; then
-            found_dir="$(find . -maxdepth 5 -type f -name "*.robot" -printf '%h\n' | sort -u | head -n 1 || true)"
-            found_dir="${found_dir#./}"
-            TEST_ROOT="${found_dir:-}"
-          fi
-          [[ -n "$TEST_ROOT" ]] || (echo "ERROR: Could not find Robot tests" && exit 1)
-          echo "TEST_ROOT=$TEST_ROOT" >> "$GITHUB_ENV"
-
       - name: Create docker-compose CI override (random host ports)
         shell: bash
         run: |
@@ -296,25 +247,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            up -d --pull missing
-          docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            ps
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
+          eval "$COMPOSE up -d --pull missing"
+          eval "$COMPOSE ps"
 
       - name: Detect published ports and export BASE_URL / API_DOC_URL
         shell: bash
         run: |
           set -euo pipefail
-          WEB_BIND="$(docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            port web 80)"
-          UI_BIND="$(docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            port angular-ui 4200)"
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
+
+          WEB_BIND="$(eval "$COMPOSE port web 80")"
+          UI_BIND="$(eval "$COMPOSE port angular-ui 4200")"
+
           WEB_PORT="${WEB_BIND##*:}"
           UI_PORT="${UI_BIND##*:}"
+
           echo "API_DOC_URL=http://localhost:${WEB_PORT}/api/documentation" >> "$GITHUB_ENV"
           echo "BASE_URL=http://localhost:${UI_PORT}" >> "$GITHUB_ENV"
 
@@ -322,42 +270,39 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
 
           echo "Waiting for API docs on ${API_DOC_URL} ..."
+          ok=false
           for i in {1..180}; do
-            curl -fsS "${API_DOC_URL}" >/dev/null 2>&1 && break
+            if curl -fsS "${API_DOC_URL}" >/dev/null 2>&1; then ok=true; break; fi
             sleep 2
           done
+          $ok || (echo "API not ready" && eval "$COMPOSE logs --no-color | tail -n 500" && exit 1)
 
           echo "Waiting for DB (${DB_SERVICE}) ..."
+          ok=false
           for i in {1..120}; do
-            if docker compose -p "${COMPOSE_PROJECT_NAME}" \
-              -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-              exec -T "${DB_SERVICE}" sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent' \
-              >/dev/null 2>&1; then
-              break
-            fi
+            if eval "$COMPOSE exec -T '${DB_SERVICE}' sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent'" >/dev/null 2>&1; then ok=true; break; fi
             sleep 2
           done
+          $ok || (echo "DB not ready" && eval "$COMPOSE logs --no-color | tail -n 500" && exit 1)
 
           echo "Seeding in ${API_SERVICE}: ${SEED_CMD}"
-          docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            exec -T "${API_SERVICE}" ${SEED_CMD}
+          eval "$COMPOSE exec -T '${API_SERVICE}' ${SEED_CMD}"
 
-          OUT="$(docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            exec -T "${API_SERVICE}" php artisan tinker --execute='echo \App\Models\Product::count();' || true)"
+          OUT="$(eval "$COMPOSE exec -T '${API_SERVICE}' php artisan tinker --execute='echo \App\Models\Product::count();'" || true)"
           COUNT="$(echo "${OUT}" | tr -dc '0-9' || true)"
           echo "Product count: ${COUNT}"
-          [[ -n "${COUNT}" && "${COUNT}" -gt 0 ]]
+          [[ -n "${COUNT}" && "${COUNT}" -gt 0 ]] || (echo "Seed verification failed" && exit 1)
 
           echo "Waiting for UI on ${BASE_URL} ..."
+          ok=false
           for i in {1..180}; do
-            curl -fsS "${BASE_URL}" >/dev/null 2>&1 && exit 0
+            if curl -fsS "${BASE_URL}" >/dev/null 2>&1; then ok=true; break; fi
             sleep 2
           done
-          exit 1
+          $ok || (echo "UI not reachable" && eval "$COMPOSE logs --no-color | tail -n 500" && exit 1)
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -379,32 +324,52 @@ jobs:
           pip install -r requirements.txt
           rfbrowser init
 
-      - name: Run Regression
+      # -----------------------
+      # API Regression
+      # -----------------------
+      - name: Run API Regression (pytest)
         shell: bash
         run: |
           set -euo pipefail
-          echo "Running Robot tests from TEST_ROOT=${TEST_ROOT}"
-          robot --outputdir artifacts/regression --include regression "${TEST_ROOT}"
+          mkdir -p artifacts/api/regression
+          pytest -q -m "regression" \
+            --junitxml="artifacts/api/regression/junit.xml" \
+            "api-tests"
 
-      - name: Upload Regression artifacts
+      - name: Upload API Regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-artifacts-regression
+          path: artifacts/api/regression
+
+      # -----------------------
+      # UI Regression
+      # -----------------------
+      - name: Run UI Regression (Robot)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/ui/regression
+          robot --outputdir artifacts/ui/regression --include regression ui-tests
+
+      - name: Upload UI Regression artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: robot-artifacts-regression
-          path: artifacts/regression
+          path: artifacts/ui/regression
 
       - name: Docker logs (always)
         if: always()
         shell: bash
         run: |
-          docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            logs --no-color | tail -n 500
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
+          eval "$COMPOSE logs --no-color | tail -n 500"
 
       - name: Stop docker stack
         if: always()
         shell: bash
         run: |
-          docker compose -p "${COMPOSE_PROJECT_NAME}" \
-            -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml \
-            down -v --remove-orphans
+          COMPOSE="docker compose -p '${COMPOSE_PROJECT_NAME}' -f '${COMPOSE_FILE}' -f 'docker/docker-compose.ci.yml'"
+          eval "$COMPOSE down -v --remove-orphans"
