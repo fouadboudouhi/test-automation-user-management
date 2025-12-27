@@ -43,6 +43,7 @@ HEADLESS  ?= true
 ARTIFACTS     ?= artifacts
 UI_ARTIFACTS  ?= $(ARTIFACTS)/ui
 API_ARTIFACTS ?= $(ARTIFACTS)/api
+K6_ARTIFACTS  ?= $(ARTIFACTS)/k6
 
 # Python / pytest
 PYTHON ?= python
@@ -72,6 +73,7 @@ endef
         rfbrowser-init ui-smoke ui-regression \
         api-smoke api-regression \
         smoke regression test-all \
+        k6-smoke k6-ramp k6-peak k6-soak \
         lint format typecheck ui-open-latest
 
 help:
@@ -84,10 +86,18 @@ help:
 	@echo "  make regression    - run API + UI regression"
 	@echo "  make test-all      - up -> seed -> smoke -> regression"
 	@echo ""
+	@echo "Load tests (k6):"
+	@echo "  make k6-smoke      - short read-only smoke load"
+	@echo "  make k6-ramp       - ramp up/hold/down (capacity trend)"
+	@echo "  make k6-peak       - short spike/peak"
+	@echo "  make k6-soak       - long run (manual/weekly), default 30m"
+	@echo ""
 	@echo "Useful overrides:"
 	@echo "  COMPOSE_PROJECT_NAME=toolshop-e2e-2 WEB_PORT=8092 UI_PORT=4201 make test-all"
 	@echo "  HEADLESS=false make ui-smoke"
 	@echo "  COV=true COV_FAIL_UNDER=60 make api-smoke"
+	@echo "  make k6-ramp K6_RAMP_TARGET=40 K6_RAMP_UP=3m K6_RAMP_HOLD=5m"
+	@echo "  make k6-soak K6_SOAK_VUS=10 K6_SOAK_DURATION=30m"
 
 up:
 	$(DC) up -d --pull missing
@@ -142,7 +152,6 @@ seed: wait-api wait-db
 	$(DC) exec -T $(API_SERVICE) $(SEED_CMD)
 	$(MAKE) verify-seed
 
-# Robust: query DB directly, no PHP warning noise
 verify-seed:
 	@echo "Verifying product count > 0 (via SQL) ..."
 	@COUNT="$$( $(DC) exec -T $(DB_SERVICE) sh -lc 'mysql -N -B -uroot -p"$$MYSQL_ROOT_PASSWORD" -h 127.0.0.1 -e "SELECT COUNT(*) FROM products;" "$(DB_NAME)"' 2>/dev/null || true )"; \
@@ -191,6 +200,7 @@ ui-regression: wait-ui rfbrowser-init
 	echo "UI regression artifacts: $$OUT"; \
 	BASE_URL="$(BASE_URL)" HEADLESS="$(HEADLESS)" \
 	robot --outputdir "$$OUT" --include "$(REG_TAG)" "$(UI_TEST_ROOT)"
+
 # ----------------------------
 # API tests (pytest)
 # ----------------------------
@@ -210,7 +220,6 @@ api-smoke: wait-api
 		echo ""; \
 		echo "ERROR: pytest collected 0 tests (exit code 5)."; \
 		echo "Hint: run: $(PYTHON) -m pytest -vv --collect-only $(API_SMOKE_FILE)"; \
-		echo "Also check: pytest.ini / python environment / plugins."; \
 		exit 5; \
 	fi; \
 	exit $$RC
@@ -260,21 +269,102 @@ ui-open-latest:
 		exit 2; \
 	fi
 
+# ----------------------------
+# Load tests (k6)
+# ----------------------------
+K6 ?= k6
+
+K6_SCRIPT_SMOKE ?= load/k6/smoke.js
+K6_SCRIPT_RAMP  ?= load/k6/ramp.js
+K6_SCRIPT_PEAK  ?= load/k6/peak.js
+K6_SCRIPT_SOAK  ?= load/k6/soak.js
+
+K6_VUS ?= 10
+K6_DURATION ?= 1m
+
+K6_RAMP_TARGET ?= 25
+K6_RAMP_UP     ?= 2m
+K6_RAMP_HOLD   ?= 3m
+K6_RAMP_DOWN   ?= 1m
+
+K6_PEAK_VUS       ?= 50
+K6_PEAK_RAMP_UP   ?= 15s
+K6_PEAK_HOLD      ?= 60s
+K6_PEAK_RAMP_DOWN ?= 30s
+
+K6_SOAK_VUS      ?= 10
+K6_SOAK_DURATION ?= 30m
+
+k6-smoke: wait-api
+	@$(call require_cmd,$(K6))
+	@BASE_DIR="$(K6_ARTIFACTS)/smoke"; \
+	mkdir -p "$$BASE_DIR"; \
+	LAST="$$(find "$$BASE_DIR" -maxdepth 1 -type d -name 'run-*' -print 2>/dev/null \
+		| sed -E 's#.*/run-##' \
+		| sort -n \
+		| tail -n 1)"; \
+	LAST_NUM="$$(printf '%d' "$${LAST:-0}" 2>/dev/null || echo 0)"; \
+	NEXT="$$((LAST_NUM + 1))"; \
+	OUT="$$BASE_DIR/run-$$(printf '%03d' $$NEXT)"; \
+	mkdir -p "$$OUT"; \
+	echo "k6 smoke artifacts: $$OUT"; \
+	API_URL="$(API_HOST)" DEMO_EMAIL="$(DEMO_EMAIL)" DEMO_PASSWORD="$(DEMO_PASSWORD)" \
+	VUS="$(K6_VUS)" DURATION="$(K6_DURATION)" \
+	$(K6) run --summary-export="$$OUT/summary.json" "$(K6_SCRIPT_SMOKE)"
+
+k6-ramp: wait-api
+	@$(call require_cmd,$(K6))
+	@BASE_DIR="$(K6_ARTIFACTS)/ramp"; \
+	mkdir -p "$$BASE_DIR"; \
+	LAST="$$(find "$$BASE_DIR" -maxdepth 1 -type d -name 'run-*' -print 2>/dev/null \
+		| sed -E 's#.*/run-##' \
+		| sort -n \
+		| tail -n 1)"; \
+	LAST_NUM="$$(printf '%d' "$${LAST:-0}" 2>/dev/null || echo 0)"; \
+	NEXT="$$((LAST_NUM + 1))"; \
+	OUT="$$BASE_DIR/run-$$(printf '%03d' $$NEXT)"; \
+	mkdir -p "$$OUT"; \
+	echo "k6 ramp artifacts: $$OUT"; \
+	API_URL="$(API_HOST)" DEMO_EMAIL="$(DEMO_EMAIL)" DEMO_PASSWORD="$(DEMO_PASSWORD)" \
+	RAMP_TARGET="$(K6_RAMP_TARGET)" RAMP_UP="$(K6_RAMP_UP)" RAMP_HOLD="$(K6_RAMP_HOLD)" RAMP_DOWN="$(K6_RAMP_DOWN)" \
+	$(K6) run --summary-export="$$OUT/summary.json" "$(K6_SCRIPT_RAMP)"
+
+k6-peak: wait-api
+	@$(call require_cmd,$(K6))
+	@BASE_DIR="$(K6_ARTIFACTS)/peak"; \
+	mkdir -p "$$BASE_DIR"; \
+	LAST="$$(find "$$BASE_DIR" -maxdepth 1 -type d -name 'run-*' -print 2>/dev/null \
+		| sed -E 's#.*/run-##' \
+		| sort -n \
+		| tail -n 1)"; \
+	LAST_NUM="$$(printf '%d' "$${LAST:-0}" 2>/dev/null || echo 0)"; \
+	NEXT="$$((LAST_NUM + 1))"; \
+	OUT="$$BASE_DIR/run-$$(printf '%03d' $$NEXT)"; \
+	mkdir -p "$$OUT"; \
+	echo "k6 peak artifacts: $$OUT"; \
+	API_URL="$(API_HOST)" DEMO_EMAIL="$(DEMO_EMAIL)" DEMO_PASSWORD="$(DEMO_PASSWORD)" \
+	PEAK_VUS="$(K6_PEAK_VUS)" PEAK_RAMP_UP="$(K6_PEAK_RAMP_UP)" PEAK_HOLD="$(K6_PEAK_HOLD)" PEAK_RAMP_DOWN="$(K6_PEAK_RAMP_DOWN)" \
+	$(K6) run --summary-export="$$OUT/summary.json" "$(K6_SCRIPT_PEAK)"
+
+k6-soak: wait-api
+	@$(call require_cmd,$(K6))
+	@BASE_DIR="$(K6_ARTIFACTS)/soak"; \
+	mkdir -p "$$BASE_DIR"; \
+	LAST="$$(find "$$BASE_DIR" -maxdepth 1 -type d -name 'run-*' -print 2>/dev/null \
+		| sed -E 's#.*/run-##' \
+		| sort -n \
+		| tail -n 1)"; \
+	LAST_NUM="$$(printf '%d' "$${LAST:-0}" 2>/dev/null || echo 0)"; \
+	NEXT="$$((LAST_NUM + 1))"; \
+	OUT="$$BASE_DIR/run-$$(printf '%03d' $$NEXT)"; \
+	mkdir -p "$$OUT"; \
+	echo "k6 soak artifacts: $$OUT"; \
+	API_URL="$(API_HOST)" DEMO_EMAIL="$(DEMO_EMAIL)" DEMO_PASSWORD="$(DEMO_PASSWORD)" \
+	SOAK_VUS="$(K6_SOAK_VUS)" SOAK_DURATION="$(K6_SOAK_DURATION)" \
+	$(K6) run --summary-export="$$OUT/summary.json" "$(K6_SCRIPT_SOAK)"
+
 # Combined pipeline targets (API + UI)
 smoke: api-smoke ui-smoke
 regression: api-regression ui-regression
 
 test-all: up seed smoke regression
-
-# Optional local quality helpers (if you want)
-lint:
-	@$(call require_cmd,ruff)
-	ruff check .
-
-format:
-	@$(call require_cmd,ruff)
-	ruff format .
-
-typecheck:
-	@$(call require_cmd,mypy)
-	mypy tests/api

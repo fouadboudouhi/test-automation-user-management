@@ -1,0 +1,106 @@
+name: CI (Load: k6)
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: "0 2 * * *"   # nightly ramp+peak
+    - cron: "0 3 * * 1"   # weekly soak (Montag)
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Which load scenario to run?"
+        required: true
+        default: "smoke"
+        type: choice
+        options:
+          - smoke
+          - ramp
+          - peak
+          - soak
+
+concurrency:
+  group: load-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  load:
+    name: Load Tests (k6)
+    runs-on: ubuntu-latest
+
+    env:
+      WEB_PORT: "8091"
+      UI_PORT: "4200"
+
+      DEMO_EMAIL: customer@practicesoftwaretesting.com
+      DEMO_PASSWORD: welcome01
+
+      COMPOSE_FILE: docker/docker-compose.yml
+      COMPOSE_PROJECT_NAME: toolshop-ci-${{ github.run_id }}-${{ github.run_attempt }}-k6
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Start stack + seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          make up
+          make seed
+
+      - name: k6 smoke (push main)
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          make k6-smoke
+
+      - name: nightly ramp + peak
+        if: github.event_name == 'schedule' && github.event.schedule == '0 2 * * *'
+        shell: bash
+        run: |
+          set -euo pipefail
+          make k6-ramp
+          make k6-peak
+
+      - name: weekly soak
+        if: github.event_name == 'schedule' && github.event.schedule == '0 3 * * 1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          make k6-soak
+
+      - name: manual scenario
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.scenario }}" in
+            smoke) make k6-smoke ;;
+            ramp)  make k6-ramp ;;
+            peak)  make k6-peak ;;
+            soak)  make k6-soak ;;
+          esac
+
+      - name: Upload artifacts (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-k6-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts
+
+      - name: Docker logs (only on failure)
+        if: failure()
+        shell: bash
+        run: |
+          make logs || true
+
+      - name: Cleanup (always)
+        if: always()
+        shell: bash
+        run: |
+          make clean || true
