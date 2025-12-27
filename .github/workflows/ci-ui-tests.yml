@@ -1,186 +1,41 @@
-name: UI Tests (Docker + Robot)
+name: CI (Smoke + Regression)
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  schedule:
+    # Nightly: 02:00 UTC (im Winter 03:00 Berlin, im Sommer 04:00 Berlin)
+    - cron: "0 2 * * *"
+  workflow_dispatch:
 
 concurrency:
-  group: ui-tests-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   smoke:
-    name: Smoke (QGate)
+    name: Smoke
     runs-on: ubuntu-latest
 
     env:
-      COMPOSE_FILE: docker/docker-compose.yml
-      COMPOSE_PROJECT_NAME: ui-${{ github.run_id }}-${{ github.run_attempt }}
-
-      API_SERVICE: laravel-api
-      DB_SERVICE: mariadb
-      SEED_CMD: php artisan migrate:fresh --seed
-
+      # fixed ports are OK (separate runner per job)
+      WEB_PORT: "8091"
+      UI_PORT: "4200"
       HEADLESS: "true"
+
+      # demo creds
       DEMO_EMAIL: customer@practicesoftwaretesting.com
       DEMO_PASSWORD: welcome01
+
+      # docker compose
+      COMPOSE_FILE: docker/docker-compose.yml
+      COMPOSE_PROJECT_NAME: toolshop-ci-${{ github.run_id }}-${{ github.run_attempt }}-smoke
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Debug repo tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          ls -la
-          echo "--- dirs (maxdepth 3) ---"
-          find . -maxdepth 3 -type d -print
-
-      - name: Resolve test roots (API/UI)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          pick_dir () {
-            local label="$1"; shift
-            for d in "$@"; do
-              if [[ -d "$d" ]]; then
-                echo "$d"
-                return 0
-              fi
-            done
-            echo ""
-            return 0
-          }
-
-          API_ROOT="$(pick_dir api \
-            "api-tests" "api_tests" \
-            "tests/api-tests" "tests/api_tests" "tests/api" "tests/api-tests/tests" \
-          )"
-          UI_ROOT="$(pick_dir ui \
-            "ui-tests" "ui_tests" \
-            "tests/ui-tests" "tests/ui_tests" "tests/ui" \
-          )"
-
-          if [[ -z "${API_ROOT}" ]]; then
-            echo "ERROR: API tests directory not found. Checked: api-tests, api_tests, tests/api, tests/api-tests, tests/api_tests"
-            exit 2
-          fi
-          if [[ -z "${UI_ROOT}" ]]; then
-            echo "ERROR: UI tests directory not found. Checked: ui-tests, ui_tests, tests/ui, tests/ui-tests, tests/ui_tests"
-            exit 2
-          fi
-
-          echo "API_TEST_ROOT=${API_ROOT}" >> "$GITHUB_ENV"
-          echo "UI_TEST_ROOT=${UI_ROOT}" >> "$GITHUB_ENV"
-
-          echo "Resolved:"
-          echo "  API_TEST_ROOT=${API_ROOT}"
-          echo "  UI_TEST_ROOT=${UI_ROOT}"
-
-      - name: Create docker-compose CI override (random host ports)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat > docker/docker-compose.ci.yml <<'YML'
-          services:
-            mariadb:
-              ports: []
-            web:
-              ports:
-                - "80"
-            angular-ui:
-              ports:
-                - "4200"
-          YML
-
-      - name: Start docker stack
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml up -d --pull missing
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml ps
-
-      - name: Detect published ports and export BASE_URL / API_DOC_URL
-        shell: bash
-        run: |
-          set -euo pipefail
-          WEB_BIND="$(docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml port web 80)"
-          UI_BIND="$(docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml port angular-ui 4200)"
-
-          WEB_PORT="${WEB_BIND##*:}"
-          UI_PORT="${UI_BIND##*:}"
-
-          echo "API_DOC_URL=http://localhost:${WEB_PORT}/api/documentation" >> "$GITHUB_ENV"
-          echo "BASE_URL=http://localhost:${UI_PORT}" >> "$GITHUB_ENV"
-
-      - name: Wait for API docs endpoint
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Waiting for API docs on ${API_DOC_URL} ..."
-          for i in {1..180}; do
-            if curl -fsS "${API_DOC_URL}" >/dev/null 2>&1; then
-              echo "API docs reachable ✅"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "API docs not reachable ❌"
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml logs --no-color | tail -n 500
-          exit 1
-
-      - name: Wait for DB to accept connections
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Waiting for DB (${DB_SERVICE}) ..."
-          for i in {1..120}; do
-            if docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml exec -T "${DB_SERVICE}" \
-              sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent' >/dev/null 2>&1; then
-              echo "DB ready ✅"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "DB not ready ❌"
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml logs --no-color | tail -n 500
-          exit 1
-
-      - name: Migrate + seed database
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml exec -T "${API_SERVICE}" ${SEED_CMD}
-
-      - name: Verify seed (product count > 0)
-        shell: bash
-        run: |
-          set -euo pipefail
-          OUT="$(docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml exec -T "${API_SERVICE}" \
-            php artisan tinker --execute='echo \App\Models\Product::count();' || true)"
-          COUNT="$(echo "${OUT}" | tr -dc '0-9' || true)"
-          echo "Product count: ${COUNT}"
-          [[ -n "${COUNT}" && "${COUNT}" -gt 0 ]]
-
-      - name: Wait for UI
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Waiting for UI on ${BASE_URL} ..."
-          for i in {1..180}; do
-            if curl -fsS "${BASE_URL}" >/dev/null 2>&1; then
-              echo "UI reachable ✅"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "UI not reachable ❌"
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml logs --no-color | tail -n 500
-          exit 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -188,51 +43,42 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('requirements.txt') }}
-
-      - name: Install deps + init Browser
+      - name: Install Python deps
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # optional dev deps if present
+          if [[ -f requirements-dev.txt ]]; then pip install -r requirements-dev.txt; fi
           rfbrowser init
 
-      - name: Run API Smoke (pytest) (required)
+      - name: Run Smoke via Makefile
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p artifacts/api/smoke
-          pytest -q -m "smoke" --junitxml="artifacts/api/smoke/junit.xml" "${API_TEST_ROOT}"
+          make up
+          make seed
+          make smoke
 
-      - name: Run UI Smoke (Robot) (required)
-        shell: bash
-        run: |
-          set -euo pipefail
-          robot --outputdir artifacts/ui/smoke --include smoke "${UI_TEST_ROOT}"
-
-      - name: Upload Smoke artifacts
+      - name: Upload artifacts (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-artifacts-smoke
+          name: artifacts-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts
 
       - name: Docker logs (always)
         if: always()
         shell: bash
         run: |
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml logs --no-color | tail -n 500
+          make logs || true
 
-      - name: Stop docker stack
+      - name: Cleanup (always)
         if: always()
         shell: bash
         run: |
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml down -v --remove-orphans
+          make clean || true
 
   regression:
     name: Regression
@@ -241,123 +87,19 @@ jobs:
     if: needs.smoke.result == 'success'
 
     env:
-      COMPOSE_FILE: docker/docker-compose.yml
-      COMPOSE_PROJECT_NAME: ui-${{ github.run_id }}-${{ github.run_attempt }}-reg
-
-      API_SERVICE: laravel-api
-      DB_SERVICE: mariadb
-      SEED_CMD: php artisan migrate:fresh --seed
-
+      WEB_PORT: "8091"
+      UI_PORT: "4200"
       HEADLESS: "true"
+
       DEMO_EMAIL: customer@practicesoftwaretesting.com
       DEMO_PASSWORD: welcome01
+
+      COMPOSE_FILE: docker/docker-compose.yml
+      COMPOSE_PROJECT_NAME: toolshop-ci-${{ github.run_id }}-${{ github.run_attempt }}-regression
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Resolve test roots (API/UI)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          pick_dir () {
-            local label="$1"; shift
-            for d in "$@"; do
-              if [[ -d "$d" ]]; then
-                echo "$d"
-                return 0
-              fi
-            done
-            echo ""
-            return 0
-          }
-
-          API_ROOT="$(pick_dir api \
-            "api-tests" "api_tests" \
-            "tests/api-tests" "tests/api_tests" "tests/api" \
-          )"
-          UI_ROOT="$(pick_dir ui \
-            "ui-tests" "ui_tests" \
-            "tests/ui-tests" "tests/ui_tests" "tests/ui" \
-          )"
-
-          if [[ -z "${API_ROOT}" ]]; then
-            echo "ERROR: API tests directory not found."
-            exit 2
-          fi
-          if [[ -z "${UI_ROOT}" ]]; then
-            echo "ERROR: UI tests directory not found."
-            exit 2
-          fi
-
-          echo "API_TEST_ROOT=${API_ROOT}" >> "$GITHUB_ENV"
-          echo "UI_TEST_ROOT=${UI_ROOT}" >> "$GITHUB_ENV"
-
-      - name: Create docker-compose CI override (random host ports)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat > docker/docker-compose.ci.yml <<'YML'
-          services:
-            mariadb:
-              ports: []
-            web:
-              ports:
-                - "80"
-            angular-ui:
-              ports:
-                - "4200"
-          YML
-
-      - name: Start docker stack
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml up -d --pull missing
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml ps
-
-      - name: Detect published ports and export BASE_URL / API_DOC_URL
-        shell: bash
-        run: |
-          set -euo pipefail
-          WEB_BIND="$(docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml port web 80)"
-          UI_BIND="$(docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml port angular-ui 4200)"
-
-          WEB_PORT="${WEB_BIND##*:}"
-          UI_PORT="${UI_BIND##*:}"
-
-          echo "API_DOC_URL=http://localhost:${WEB_PORT}/api/documentation" >> "$GITHUB_ENV"
-          echo "BASE_URL=http://localhost:${UI_PORT}" >> "$GITHUB_ENV"
-
-      - name: Wait + Seed + UI
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "Waiting for API docs on ${API_DOC_URL} ..."
-          for i in {1..180}; do
-            curl -fsS "${API_DOC_URL}" >/dev/null 2>&1 && break
-            sleep 2
-          done
-
-          echo "Waiting for DB (${DB_SERVICE}) ..."
-          for i in {1..120}; do
-            if docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml exec -T "${DB_SERVICE}" \
-              sh -lc 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent' >/dev/null 2>&1; then
-              break
-            fi
-            sleep 2
-          done
-
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml exec -T "${API_SERVICE}" ${SEED_CMD}
-
-          echo "Waiting for UI on ${BASE_URL} ..."
-          for i in {1..180}; do
-            curl -fsS "${BASE_URL}" >/dev/null 2>&1 && exit 0
-            sleep 2
-          done
-          exit 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -365,48 +107,38 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('requirements.txt') }}
-
-      - name: Install deps + init Browser
+      - name: Install Python deps
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          if [[ -f requirements-dev.txt ]]; then pip install -r requirements-dev.txt; fi
           rfbrowser init
 
-      - name: Run API Regression (pytest) (required)
+      - name: Run Regression via Makefile
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p artifacts/api/regression
-          pytest -q -m "regression" --junitxml="artifacts/api/regression/junit.xml" "${API_TEST_ROOT}"
+          make up
+          make seed
+          make regression
 
-      - name: Run UI Regression (Robot) (required)
-        shell: bash
-        run: |
-          set -euo pipefail
-          robot --outputdir artifacts/ui/regression --include regression "${UI_TEST_ROOT}"
-
-      - name: Upload Regression artifacts
+      - name: Upload artifacts (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-artifacts-regression
+          name: artifacts-regression-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts
 
       - name: Docker logs (always)
         if: always()
         shell: bash
         run: |
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml logs --no-color | tail -n 500
+          make logs || true
 
-      - name: Stop docker stack
+      - name: Cleanup (always)
         if: always()
         shell: bash
         run: |
-          docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}" -f docker/docker-compose.ci.yml down -v --remove-orphans
+          make clean || true
